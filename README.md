@@ -32,7 +32,7 @@
 This project migrates a monolithic webhook inspection tool into a full microservices architecture. Users can create named webhook endpoints, forward any HTTP request to them, and inspect every captured request — all secured behind Google JWT authentication with no additional auth server required.
 
 **Key highlights:**
-- Google OAuth2 replaces Keycloak — no external identity server to run
+- Google OAuth2
 - JWT validation happens directly against Google's public JWK URI
 - Services discover each other via Eureka; config is managed centrally
 - OpenFeign handles typed HTTP calls between services
