@@ -1,0 +1,148 @@
+services:
+
+  # ── Databases ──────────────────────────────────────────────
+  mysql-users:
+    image: mysql:8.0
+    platform: linux/arm64
+    container_name: mysql-users
+    environment:
+      MYSQL_ROOT_PASSWORD: kanav007
+      MYSQL_DATABASE: webhook_users
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_users_data:/var/lib/mysql
+    networks:
+      - webhook-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mysql-webhook:
+    image: mysql:8.0
+    platform: linux/arm64
+    container_name: mysql-webhook
+    environment:
+      MYSQL_ROOT_PASSWORD: kanav007
+      MYSQL_DATABASE: webhook_data
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql_webhook_data:/var/lib/mysql
+    networks:
+      - webhook-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  eureka-server:
+    build:
+      context: ./eureka-server
+      platforms:
+        - linux/arm64
+    container_name: eureka-server
+    ports:
+      - "8761:8761"
+    networks:
+      - webhook-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8761/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  config-server:
+    build:
+      context: ./config-server
+      platforms:
+        - linux/arm64
+    container_name: config-server
+    ports:
+      - "8888:8888"
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      eureka-server:
+        condition: service_healthy
+    networks:
+      - webhook-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8888/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: ./api-gateway
+      platforms:
+        - linux/arm64
+    container_name: api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_CONFIG_IMPORT: configserver:http://config-server:8888
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+    depends_on:
+      config-server:
+        condition: service_healthy
+    networks:
+      - webhook-net
+
+  user-service:
+    build:
+      context: ./user-service
+      platforms:
+        - linux/arm64
+    container_name: user-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_CONFIG_IMPORT: configserver:http://config-server:8888
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-users:3306/webhook_users
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: kanav007
+    depends_on:
+      config-server:
+        condition: service_healthy
+      mysql-users:
+        condition: service_healthy
+    networks:
+      - webhook-net
+
+  webhook-service:
+    build:
+      context: ./webhook-service
+      platforms:
+        - linux/arm64
+    container_name: webhook-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_CONFIG_IMPORT: configserver:http://config-server:8888
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka-server:8761/eureka/
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-webhook:3306/webhook_data
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: kanav007
+    depends_on:
+      config-server:
+        condition: service_healthy
+      mysql-webhook:
+        condition: service_healthy
+      user-service:
+        condition: service_started
+    networks:
+      - webhook-net
+
+volumes:
+  mysql_users_data:
+  mysql_webhook_data:
+
+networks:
+  webhook-net:
+    driver: bridge

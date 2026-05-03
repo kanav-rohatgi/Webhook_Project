@@ -1,0 +1,28 @@
+server:
+  port: 8081
+
+spring:
+  datasource:
+    url: jdbc:mysql://localhost:3306/webhook_users
+    driverClassName: com.mysql.cj.jdbc.Driver
+    username: root
+    password: kanav007
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: https://www.googleapis.com/oauth2/v3/certs
+
+google:
+  client-id: 393356355602-ctoquagsborrhajua676b1eigg657tik.apps.googleusercontent.com
+
+cors:
+  allowed-origins: http://localhost:4200
