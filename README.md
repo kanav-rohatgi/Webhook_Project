@@ -1,6 +1,42 @@
-# Webhook Microservices — Google OAuth2
+# 🪝 Webhooks
 
-Monolith → Microservices migration. Keycloak removed. Google OAuth2 replaces it entirely.
+> A production-style Spring Boot microservices platform for managing programmable webhook endpoints — secured with Google OAuth2, orchestrated via Eureka, and fully containerised with Docker Compose.
+
+![Java](https://img.shields.io/badge/Java-17-orange?logo=openjdk&logoColor=white)
+![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.3.3-6DB33F?logo=springboot&logoColor=white)
+![Spring Cloud](https://img.shields.io/badge/Spring_Cloud-2023.0.3-6DB33F?logo=spring&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Auth](https://img.shields.io/badge/Auth-Google_OAuth2-4285F4?logo=google&logoColor=white)
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Services](#services)
+- [Tech Stack](#tech-stack)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Google OAuth2 Setup](#google-oauth2-setup)
+  - [Run with Docker Compose](#run-with-docker-compose)
+  - [Run Locally](#run-locally)
+- [API Reference](#api-reference)
+- [Frontend Integration](#frontend-integration)
+
+---
+
+## Overview
+
+This project migrates a monolithic webhook inspection tool into a full microservices architecture. Users can create named webhook endpoints, forward any HTTP request to them, and inspect every captured request — all secured behind Google JWT authentication with no additional auth server required.
+
+**Key highlights:**
+- Google OAuth2 replaces Keycloak — no external identity server to run
+- JWT validation happens directly against Google's public JWK URI
+- Services discover each other via Eureka; config is managed centrally
+- OpenFeign handles typed HTTP calls between services
+- One Docker Compose command spins up the entire stack
 
 ---
 
@@ -9,106 +45,127 @@ Monolith → Microservices migration. Keycloak removed. Google OAuth2 replaces i
 ```
 Client
   │
+  │   Authorization: Bearer <google_id_token>
   ▼
-API Gateway (8080)  ──── Google Auth Server (JWT verification)
+API Gateway  (port 8080)  ──── Google JWK URI (JWT validation)
   │
-  ├──── /users/**  ──────► User Service (8081) ──► MySQL: webhook_users
+  ├── /users/**  ──────────► User Service   (8081) ──► MySQL: webhook_users
   │
-  └──── /api/**   ──────► Webhook Service (8082) ──► MySQL: webhook_data
-                               │
-                               └── OpenFeign ──► User Service (internal)
+  └── /api/**   ──────────► Webhook Service (8082) ──► MySQL: webhook_data
+                                  │
+                                  └── OpenFeign ──► User Service (internal)
 
-Infrastructure:
-  Eureka Server (8761) — service discovery
-  Config Server (8888) — centralised config
+Infrastructure
+  ├── Eureka Server  (8761)  — service discovery & health dashboard
+  └── Config Server  (8888)  — centralised per-service configuration
 ```
 
 ---
 
-## Step 1 — Google Cloud Console Setup
+## Services
 
-1. Go to https://console.cloud.google.com
-2. Create a new project (e.g. `webhook-app`)
-3. Navigate to **APIs & Services → OAuth consent screen**
+| Service | Port | Responsibility |
+|---|---|---|
+| **API Gateway** | 8080 | Single entry point, JWT validation, request routing |
+| **User Service** | 8081 | User registration & profile from Google JWT claims |
+| **Webhook Service** | 8082 | Endpoint management, request capture & retrieval |
+| **Eureka Server** | 8761 | Service registry & health dashboard |
+| **Config Server** | 8888 | Centralised YAML config (native classpath) |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Java 17 |
+| Framework | Spring Boot 3.3.3 |
+| Cloud | Spring Cloud 2023.0.3 (Eureka, Config, OpenFeign, Gateway) |
+| Security | Spring Security · OAuth2 Resource Server · Google JWT |
+| Persistence | Spring Data JPA · MySQL 8 |
+| Mapping | ModelMapper · Lombok |
+| Containers | Docker · Docker Compose |
+| Build | Maven |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Java 17+
+- Maven 3.8+
+- Docker & Docker Compose (for the containerised path)
+- A Google Cloud account (free tier is fine)
+
+---
+
+### Google OAuth2 Setup
+
+**Step 1 — Create OAuth credentials**
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com) and create a project (e.g. `webhook-app`).
+2. Navigate to **APIs & Services → OAuth consent screen**
    - User type: External
    - App name: Webhook App
-   - Add your email as test user
-4. Navigate to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**
+   - Add your email as a test user
+3. Navigate to **APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID**
    - Application type: Web application
-   - Authorised redirect URIs: `http://localhost:4200/callback` (your frontend)
-5. Copy your **Client ID** and **Client Secret**
+   - Authorised redirect URI: `http://localhost:4200/callback`
+4. Copy the generated **Client ID** and **Client Secret**.
 
----
+**Step 2 — Add your Client ID to the config**
 
-## Step 2 — Configure Your Client ID
+Open `config-server/src/main/resources/configs/user-service.yml` and set:
 
-Open `config-server/src/main/resources/configs/user-service.yml` and replace:
 ```yaml
 google:
-  client-id: YOUR_GOOGLE_CLIENT_ID   # ← paste here
+  client-id: YOUR_GOOGLE_CLIENT_ID
 ```
 
-Do the same in `configs/webhook-service.yml`.
+Repeat in `configs/webhook-service.yml`.
+
+> The services validate incoming Google `id_token` JWTs against Google's public key endpoint (`https://www.googleapis.com/oauth2/v3/certs`) automatically — no Keycloak or custom auth server needed.
 
 ---
 
-## Step 3 — How Google OAuth2 Works (No Keycloak!)
-
-**Before (Keycloak):**
-```
-Client → Keycloak (port 8180) → get JWT → call backend
-Backend → validates JWT against Keycloak's JWK URI
-```
-
-**After (Google):**
-```
-Client → Google (accounts.google.com) → get JWT (id_token)
-Client → sends JWT in Authorization: Bearer <token> header
-Backend → validates JWT against Google's JWK URI automatically:
-          https://www.googleapis.com/oauth2/v3/certs
-```
-
-Your frontend needs to use **Google Identity Services** library to get the `id_token`:
-```javascript
-// In your Angular frontend
-google.accounts.id.initialize({
-  client_id: 'YOUR_GOOGLE_CLIENT_ID',
-  callback: (response) => {
-    const idToken = response.credential; // ← send this as Bearer token
-    // Store and use in every API call:
-    // Authorization: Bearer <idToken>
-  }
-});
-```
-
----
-
-## Step 4 — Run With Docker Compose (Recommended)
+### Run with Docker Compose
 
 ```bash
+git clone https://github.com/your-username/webhook-microservices.git
 cd webhook-microservices
 docker-compose up --build
 ```
 
-Services start in this order automatically:
-1. MySQL DBs (webhook_users + webhook_data)
+Docker Compose starts services in dependency order:
+
+1. MySQL (webhook_users on 3307, webhook_data on 3308)
 2. Eureka Server (8761)
 3. Config Server (8888)
 4. API Gateway (8080)
 5. User Service (8081)
 6. Webhook Service (8082)
 
+All health checks are configured — each service waits for its dependencies before starting.
+
 ---
 
-## Step 5 — Run Locally Without Docker
+### Run Locally
 
-Start in this exact order (wait for each to fully start):
+**Create the databases first:**
+
+```sql
+CREATE DATABASE webhook_users;
+CREATE DATABASE webhook_data;
+```
+
+**Start each service in order (separate terminals):**
 
 ```bash
-# Terminal 1 — Eureka
+# Terminal 1 — Service Discovery
 cd eureka-server && mvn spring-boot:run
 
-# Terminal 2 — Config Server
+# Terminal 2 — Centralised Config
 cd config-server && mvn spring-boot:run
 
 # Terminal 3 — API Gateway
@@ -121,75 +178,62 @@ cd user-service && mvn spring-boot:run
 cd webhook-service && mvn spring-boot:run
 ```
 
-Create these two MySQL databases first:
-```sql
-CREATE DATABASE webhook_users;
-CREATE DATABASE webhook_data;
-```
+Wait for each service to fully register with Eureka before starting the next.
 
 ---
 
 ## API Reference
 
-All requests go through the **API Gateway on port 8080**.
-Every request needs: `Authorization: Bearer <google_id_token>`
+All requests are routed through the **API Gateway on port 8080**.  
+Every request must include: `Authorization: Bearer <google_id_token>`
 
-### User Service
+### User Service — `/users`
 
-| Method | URL | Description |
-|--------|-----|-------------|
-| POST | `/users` | Auto-register from Google JWT (call on first login) |
-| GET | `/users/me` | Get current user profile |
-
-### Webhook Service — Endpoints
-
-| Method | URL | Description |
-|--------|-----|-------------|
-| POST | `/api/endpoints` | Create a new webhook endpoint |
-| GET | `/api/endpoints` | List all your endpoints (paginated) |
-| GET | `/api/endpoints/{id}` | Get endpoint by ID |
-| GET | `/api/endpoints/name/{name}` | Get endpoint by name |
-| DELETE | `/api/endpoints/{id}` | Delete endpoint + all its requests |
-
-### Webhook Service — Incoming Requests
-
-| Method | URL | Description |
-|--------|-----|-------------|
-| ANY | `/api/{endpointName}` | Send any HTTP request to your webhook |
-| GET | `/api/{endpointName}/requests` | List all captured requests |
-| GET | `/api/{endpointName}/requests/{id}` | Get single captured request |
-| DELETE | `/api/{endpointName}/requests` | Delete all requests for endpoint |
-| DELETE | `/api/{endpointName}/requests/{id}` | Delete single request |
-
----
-
-## Key Changes From Monolith
-
-| What changed | Old (Monolith) | New (Microservices) |
+| Method | Endpoint | Description |
 |---|---|---|
-| Auth | Keycloak on port 8180 | Google OAuth2 (no server needed) |
-| Role extraction | `KeyCloakRoleConverter` (realm_access.roles) | Google JWT email_verified claim |
-| JWK URI | `localhost:8180/realms/.../certs` | `googleapis.com/oauth2/v3/certs` |
-| User FK in Endpoint | `@ManyToOne UserEntity` | `String userEmail` column |
-| Database | Single `webhook` DB | `webhook_users` + `webhook_data` |
-| Service discovery | None | Eureka Server |
-| Config | Single application.yml | Config Server (per-service YMLs) |
-| Inter-service calls | Direct method calls | OpenFeign (User Service client) |
+| `POST` | `/users` | Auto-register user from Google JWT (call once after first login) |
+| `GET` | `/users/me` | Get the current user's profile |
+
+### Webhook Service — Endpoints `/api/endpoints`
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `POST` | `/api/endpoints` | Create a new webhook endpoint |
+| `GET` | `/api/endpoints` | List all your endpoints (paginated) |
+| `GET` | `/api/endpoints/{id}` | Get endpoint by ID |
+| `GET` | `/api/endpoints/name/{name}` | Get endpoint by name |
+| `DELETE` | `/api/endpoints/{id}` | Delete endpoint and all its captured requests |
+
+### Webhook Service — Incoming Requests `/api/{endpointName}`
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `ANY` | `/api/{endpointName}` | Send any HTTP request to capture it |
+| `GET` | `/api/{endpointName}/requests` | List all captured requests for the endpoint |
+| `GET` | `/api/{endpointName}/requests/{id}` | Get a single captured request |
+| `DELETE` | `/api/{endpointName}/requests` | Delete all captured requests |
+| `DELETE` | `/api/{endpointName}/requests/{id}` | Delete a single captured request |
 
 ---
+
+## Frontend Integration
+
+Your frontend needs the [Google Identity Services](https://developers.google.com/identity/gsi/web) library to obtain a Google `id_token` and send it as a Bearer token on every request.
+
+```javascript
+// Angular / any JS framework
+google.accounts.id.initialize({
+  client_id: 'YOUR_GOOGLE_CLIENT_ID',
+  callback: (response) => {
+    const idToken = response.credential;
+    // Store and attach to every API call:
+    // Authorization: Bearer <idToken>
+  }
+});
+```
+
+> **Note:** Google `id_token`s expire after 1 hour. Your frontend must handle silent refresh or re-authentication.
 
 ## Eureka Dashboard
 
-Visit http://localhost:8761 to see all registered services.
-
----
-
-## Troubleshooting
-
-**Google JWT expired?** — Google id_tokens expire in 1 hour. Your frontend must refresh them.
-
-**401 Unauthorized?** — Make sure you're sending `Authorization: Bearer <id_token>` not `access_token`.
-
-**User not found in webhook-service?** — Call `POST /users` first after Google login to register.
-
-**Feign connection refused?** — Make sure user-service is running and registered with Eureka before webhook-service starts.
+Once the stack is running, visit **http://localhost:8761** to see all registered services and their health status.
